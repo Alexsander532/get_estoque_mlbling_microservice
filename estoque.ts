@@ -363,6 +363,7 @@ async function sincronizarEstoqueSupabase(
       if (skusMap.has(sku)) {
         // ===== SKU EXISTE - ATUALIZAR =====
         const dados = skusMap.get(sku);
+        if (!dados) continue; // Pula se dados undefined
         const bling = dados.bling || 0;
         const magalu = dados.magalu || 0;
         const total = bling + quantidadeFull + magalu;
@@ -550,6 +551,9 @@ async function executarSincronizacao(): Promise<void> {
     // 6. Atualizar histórico
     await atualizarHistoricoEstoque(estoqueTotal);
 
+    console.log(
+      `[${obterTimestamp()}] ✅ Resultados: ${resultado.atualizados} atualizados, ${resultado.novos} novos`
+    );
     console.log(
       `[${obterTimestamp()}] ========== CICLO CONCLUÍDO COM SUCESSO ==========\n`
     );

@@ -246,13 +246,14 @@ async function inserirSku(
 
 /**
  * 9. DELETAR SKU (COM CUIDADO!)
+ * NOTA: Função de exemplo apenas - não recomendada em produção
  */
 async function deletarSku(sku: string) {
-  const confirmacao = confirm(
-    `Tem certeza que quer deletar o SKU ${sku}? Esta ação é irreversível!`
-  );
+  // AVISO: Esta função deleta permanentemente
+  // Descomente a linha abaixo se realmente quer deletar:
+  // if (!confirm(`Tem certeza que quer deletar o SKU ${sku}?`)) return false;
 
-  if (!confirmacao) return false;
+  console.log(`[CUIDADO] Deletando SKU: ${sku}`);
 
   const { error } = await supabase
     .from("estoque")
