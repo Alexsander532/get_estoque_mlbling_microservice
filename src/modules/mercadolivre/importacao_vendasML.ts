@@ -216,8 +216,27 @@ async function sincronizarVendas(vendas: VendaML[]): Promise<{ sucesso: number; 
 
   for (const venda of vendas) {
     try {
-      const { error } = await (supabase.from("vendas_ml") as any).insert([venda]);
-      if (error) throw error;
+      // Verificar se já existe antes de inserir
+      const { data: existing, error: checkError } = await (supabase.from("vendas_ml") as any)
+        .select("order_id")
+        .eq("order_id", venda.order_id)
+        .limit(1);
+
+      if (checkError) {
+        console.error(`❌ Erro ao verificar duplicata para ${venda.order_id}:`, checkError);
+        erro++;
+        continue;
+      }
+
+      // Se já existe, pula
+      if (existing && existing.length > 0) {
+        console.log(`⏭️  Pedido ${venda.order_id} já existe, pulando...`);
+        continue;
+      }
+
+      // Se não existe, insere
+      const { error: insertError } = await (supabase.from("vendas_ml") as any).insert([venda]);
+      if (insertError) throw insertError;
       sucesso++;
     } catch (error) {
       console.error(`❌ Erro ao sincronizar venda ${venda.order_id}:`, error);
