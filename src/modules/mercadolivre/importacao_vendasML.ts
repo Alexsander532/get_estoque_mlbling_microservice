@@ -216,7 +216,7 @@ async function sincronizarVendas(vendas: VendaML[]): Promise<{ sucesso: number; 
 
   for (const venda of vendas) {
     try {
-      const { error } = await supabase.from("vendas_ml").insert([venda]);
+      const { error } = await (supabase.from("vendas_ml") as any).insert([venda]);
       if (error) throw error;
       sucesso++;
     } catch (error) {

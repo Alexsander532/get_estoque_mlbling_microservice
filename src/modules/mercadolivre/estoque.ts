@@ -315,8 +315,8 @@ async function sincronizarEstoqueSupabase(
         const magalu = dados.magalu || 0;
         const total = bling + quantidadeFull + magalu;
 
-        const { error: errorUpdate } = await supabase
-          .from("estoque")
+        const { error: errorUpdate } = await (supabase
+          .from("estoque") as any)
           .update({
             full_ml: quantidadeFull,
             total: total,
@@ -335,7 +335,7 @@ async function sincronizarEstoqueSupabase(
           );
         }
       } else {
-        const { error: errorInsert } = await supabase.from("estoque").insert({
+        const { error: errorInsert } = await (supabase.from("estoque") as any).insert([{
           sku: sku,
           bling: 0,
           full_ml: quantidadeFull,
@@ -343,7 +343,7 @@ async function sincronizarEstoqueSupabase(
           total: quantidadeFull,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-        });
+        }]);
 
         if (errorInsert) {
           result.erros.push(
@@ -400,8 +400,8 @@ async function atualizarHistoricoEstoque(
       data_sincronizacao: new Date().toISOString(),
     }));
 
-    const { error } = await supabase
-      .from("estoque_historico")
+    const { error } = await (supabase
+      .from("estoque_historico") as any)
       .insert(registros);
 
     if (error) {
