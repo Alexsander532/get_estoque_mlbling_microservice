@@ -15,8 +15,8 @@
  */
 
 import "dotenv/config";
-import { executarSincronizacaoEstoque } from "./modules/mercadolivre/estoque";
-import { executarSincronizacaoVendas } from "./modules/mercadolivre/importacao_vendasML";
+import { executarSincronizacaoEstoque } from "./modules/mercadolivre/estoque.js";
+import { executarSincronizacaoVendas } from "./modules/mercadolivre/importacao_vendasML.js";
 
 // ================================================================================
 // VALIDAÇÃO DE VARIÁVEIS DE AMBIENTE
