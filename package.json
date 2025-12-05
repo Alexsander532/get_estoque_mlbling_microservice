@@ -2,12 +2,12 @@
   "name": "mercado-livre-estoque-sync",
   "version": "1.0.0",
   "description": "Script TypeScript para sincronizar estoque do Mercado Livre com Supabase",
-  "main": "dist/estoque.js",
+  "main": "dist/main.js",
   "type": "module",
   "scripts": {
-    "dev": "tsx estoque.ts",
+    "dev": "tsx src/main.ts",
     "build": "tsc",
-    "start": "node dist/estoque.js",
+    "start": "node dist/main.js",
     "lint": "eslint . --ext .ts"
   },
   "keywords": [
