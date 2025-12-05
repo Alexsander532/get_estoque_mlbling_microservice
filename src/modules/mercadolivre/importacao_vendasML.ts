@@ -51,10 +51,7 @@ const ML_CLIENT_SECRET = process.env.ML_CLIENT_SECRET || "S7fGGCBXIaqLEDLQeOcpdB
 const ML_REFRESH_TOKEN = process.env.ML_REFRESH_TOKEN || "";
 const SELLER_ID = 1100552101;
 
-// Supabase
-const supabaseUrl = process.env.SUPABASE_URL || "";
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || "";
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+let supabase: ReturnType<typeof createClient>;
 
 // Cache para SKU
 let skuCache: { [key: string]: number } = {};
@@ -233,6 +230,24 @@ async function sincronizarVendas(vendas: VendaML[]): Promise<{ sucesso: number; 
 
 // ============ FUNÇÃO PRINCIPAL ============
 export async function executarSincronizacaoVendas(): Promise<void> {
+  // Validar e inicializar Supabase
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl) {
+    console.error(`[${new Date().toLocaleString("pt-BR")}] ❌ ERRO: Variável SUPABASE_URL não definida!`);
+    console.error(`   Configure em: Railway → Variables → SUPABASE_URL`);
+    return;
+  }
+
+  if (!supabaseAnonKey) {
+    console.error(`[${new Date().toLocaleString("pt-BR")}] ❌ ERRO: Variável SUPABASE_ANON_KEY não definida!`);
+    console.error(`   Configure em: Railway → Variables → SUPABASE_ANON_KEY`);
+    return;
+  }
+
+  supabase = createClient(supabaseUrl, supabaseAnonKey);
+
   console.log(`\n========== INICIANDO SINCRONIZAÇÃO DE VENDAS ML ==========`);
   console.log(
     `[${new Date().toLocaleString("pt-BR")}] 🚀 Importando vendas de Mercado Livre...`

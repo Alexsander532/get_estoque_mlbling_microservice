@@ -6,13 +6,15 @@
  * Executa ambos os módulos de sincronização (Estoque e Vendas ML) em intervalos.
  * 
  * FLUXO:
- * 1. Valida variáveis de ambiente
- * 2. Executa sincronização de estoque
- * 3. Executa sincronização de vendas ML
- * 4. Repete a cada 30 minutos
+ * 1. Carrega variáveis de ambiente do .env
+ * 2. Valida variáveis de ambiente
+ * 3. Executa sincronização de estoque
+ * 4. Executa sincronização de vendas ML
+ * 5. Repete a cada 30 minutos
  * ================================================================================
  */
 
+import "dotenv/config";
 import { executarSincronizacaoEstoque } from "./modules/mercadolivre/estoque";
 import { executarSincronizacaoVendas } from "./modules/mercadolivre/importacao_vendasML";
 
@@ -29,29 +31,37 @@ function validarVariaveisAmbiente(): boolean {
     "ML_REFRESH_TOKEN",
   ];
 
-  let todasValidas = true;
-
   for (const variavel of variavelisObrigatorias) {
     const valor = process.env[variavel];
     if (!valor) {
-      console.error(`❌ ERRO: Variável ${variavel} não definida!`);
-      todasValidas = false;
+      console.error(`❌ ${variavel}: NÃO CONFIGURADA`);
     } else {
       const resumo =
         variavel === "SUPABASE_URL"
-          ? valor
+          ? valor.substring(0, 30) + "..."
           : valor.substring(0, 10) + "...";
+      
       console.log(`✅ ${variavel}: ${resumo}`);
     }
   }
 
-  if (!todasValidas) {
-    console.error(`\n❌ Algumas variáveis obrigatórias não foram configuradas.`);
-    console.error(`Configure em: Railway → Project → Variables\n`);
+  // Verificar se as variáveis estão disponíveis (seja de Railway ou .env)
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+  const mlRefreshToken = process.env.ML_REFRESH_TOKEN;
+
+  const todasDisponíveis = supabaseUrl && supabaseAnonKey && mlRefreshToken;
+
+  if (!todasDisponíveis) {
+    console.error(`\n❌ ERRO CRÍTICO: Algumas variáveis obrigatórias não estão disponíveis.`);
+    console.error(`   Configure em: Railway → Project → Variables OU no arquivo .env\n`);
     process.exit(1);
   }
 
-  console.log(`\n========== TODAS AS VARIÁVEIS VALIDADAS ✅ ==========\n`);
+  console.log(`\n========== ✅ TODAS AS VARIÁVEIS CARREGADAS COM SUCESSO ==========`);
+  console.log(`   📝 Em desenvolvimento: Variáveis do arquivo .env`);
+  console.log(`   🚀 Em produção (Railway): Variáveis do painel do Railway\n`);
+
   return true;
 }
 

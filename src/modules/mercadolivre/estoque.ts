@@ -27,9 +27,8 @@ const ML_CONFIG = {
   sellerId: "1100552101",
 };
 
-const supabaseUrl = process.env.SUPABASE_URL || "";
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || "";
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Será inicializado dentro da função
+let supabase: ReturnType<typeof createClient>;
 
 // ================================================================================
 // TIPOS / INTERFACES
@@ -448,6 +447,24 @@ export async function executarSincronizacaoEstoque(): Promise<void> {
     console.log(
       `[${obterTimestamp()}] ========== INICIANDO CICLO DE SINCRONIZAÇÃO DE ESTOQUE ==========`
     );
+
+    // Validar e inicializar Supabase
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+
+    if (!supabaseUrl) {
+      console.error(`[${obterTimestamp()}] ❌ ERRO: Variável SUPABASE_URL não definida!`);
+      console.error(`   Configure em: Railway → Variables → SUPABASE_URL`);
+      return;
+    }
+
+    if (!supabaseAnonKey) {
+      console.error(`[${obterTimestamp()}] ❌ ERRO: Variável SUPABASE_ANON_KEY não definida!`);
+      console.error(`   Configure em: Railway → Variables → SUPABASE_ANON_KEY`);
+      return;
+    }
+
+    supabase = createClient(supabaseUrl, supabaseAnonKey);
 
     const accessToken = await obterAccessToken(
       ML_CONFIG.clientId,
