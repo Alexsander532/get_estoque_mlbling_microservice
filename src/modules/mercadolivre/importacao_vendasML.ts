@@ -312,6 +312,8 @@ export async function executarSincronizacaoVendas(): Promise<void> {
       let formattedDate = "Data inválida";
       try {
         const dt = new Date(dateCreated);
+        // Subtrair 3 horas do horário
+        dt.setHours(dt.getHours() - 3);
         const dia = String(dt.getDate()).padStart(2, "0");
         const mes = String(dt.getMonth() + 1).padStart(2, "0");
         const ano = String(dt.getFullYear()).slice(-2);
