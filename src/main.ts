@@ -16,6 +16,7 @@
 
 import "dotenv/config";
 import { executarSincronizacaoEstoque } from "./modules/mercadolivre/estoque.js";
+import { executarSincronizacaoBling } from "./modules/bling/estoque.js";
 import { executarSincronizacaoVendas } from "./modules/mercadolivre/importacao_vendasML.js";
 
 // ================================================================================
@@ -91,16 +92,25 @@ async function executarCicloCompleto(): Promise<void> {
   );
 
   try {
-    // Executar estoque
+    // Executar estoque Mercado Livre
     console.log(
-      `[${obterTimestamp()}] ▶️ Iniciando sincronização de ESTOQUE...`
+      `[${obterTimestamp()}] ▶️ Iniciando sincronização de ESTOQUE ML...`
     );
     await executarSincronizacaoEstoque();
 
     // Aguardar um pouco entre as sincronizações
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
-    // Executar vendas
+    // Executar estoque Bling
+    console.log(
+      `[${obterTimestamp()}] ▶️ Iniciando sincronização de ESTOQUE BLING...`
+    );
+    await executarSincronizacaoBling();
+
+    // Aguardar um pouco entre as sincronizações
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    // Executar vendas ML
     console.log(
       `[${obterTimestamp()}] ▶️ Iniciando sincronização de VENDAS ML...`
     );

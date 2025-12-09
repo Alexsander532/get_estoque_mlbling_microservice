@@ -151,12 +151,12 @@ async function obterIdsExistentes(): Promise<Set<string>> {
 
 async function obterDadosSKUs(): Promise<{ [key: string]: number }> {
   try {
-    const { data, error } = await supabase.from("estoque").select("sku, preco_custo");
+    const { data, error } = await supabase.from("estoque").select("sku, bling");
     if (error) throw error;
 
     const skuData: { [key: string]: number } = {};
-    data?.forEach((row: { sku: string; preco_custo: number }) => {
-      skuData[row.sku] = row.preco_custo || 0;
+    data?.forEach((row: { sku: string; bling: number }) => {
+      skuData[row.sku] = row.bling || 0;
     });
 
     return skuData;
