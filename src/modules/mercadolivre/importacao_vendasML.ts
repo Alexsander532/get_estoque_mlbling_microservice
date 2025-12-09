@@ -155,14 +155,15 @@ async function obterDadosSKUs(): Promise<{ [key: string]: number }> {
     if (error) throw error;
 
     const skuData: { [key: string]: number } = {};
-    data?.forEach((row: { sku: string; preco_compra: number | string }) => {
-      // Converter para número se for string
-      const preco = typeof row.preco_compra === 'string' 
-        ? parseFloat(row.preco_compra) 
-        : row.preco_compra;
-      skuData[row.sku] = preco || 0;
+    data?.forEach((row: any) => {
+      // preco_compra é numeric(10,2), pode vir como string ou número
+      const preco = parseFloat(String(row.preco_compra || 0));
+      skuData[row.sku] = isNaN(preco) ? 0 : preco;
     });
 
+    console.log(
+      `[${new Date().toLocaleString("pt-BR")}] ✅ Carregados ${Object.keys(skuData).length} SKUs com preços de compra`
+    );
     return skuData;
   } catch (error) {
     console.error(`[${new Date().toLocaleString("pt-BR")}] ❌ Erro ao obter SKUs:`, error);
