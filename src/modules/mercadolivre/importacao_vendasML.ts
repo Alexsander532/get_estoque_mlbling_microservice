@@ -151,12 +151,16 @@ async function obterIdsExistentes(): Promise<Set<string>> {
 
 async function obterDadosSKUs(): Promise<{ [key: string]: number }> {
   try {
-    const { data, error } = await supabase.from("estoque").select("sku, bling");
+    const { data, error } = await supabase.from("estoque").select("sku, preco_compra");
     if (error) throw error;
 
     const skuData: { [key: string]: number } = {};
-    data?.forEach((row: { sku: string; bling: number }) => {
-      skuData[row.sku] = row.bling || 0;
+    data?.forEach((row: { sku: string; preco_compra: number | string }) => {
+      // Converter para número se for string
+      const preco = typeof row.preco_compra === 'string' 
+        ? parseFloat(row.preco_compra) 
+        : row.preco_compra;
+      skuData[row.sku] = preco || 0;
     });
 
     return skuData;
