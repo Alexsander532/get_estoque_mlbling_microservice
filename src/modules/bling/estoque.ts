@@ -38,6 +38,46 @@ const BLING_OAUTH_URL = "https://api.bling.com.br/oauth/authorize";
 let supabase: ReturnType<typeof createClient>;
 let currentAccessToken = BLING_ACCESS_TOKEN;
 
+// ============ FUNÇÕES AUXILIARES DE REQUISIÇÃO ============
+/**
+ * Função auxiliar para fazer requisições com retry automático em caso de rate limiting (429)
+ * Implementa backoff exponencial para respeitar os limites da API
+ */
+async function fazerRequisicaoComRetry<T>(
+  requisicao: () => Promise<T>,
+  nomeRequisicao: string,
+  tentativasMaximas: number = 5,
+  delayInicial: number = 1000
+): Promise<T> {
+  let tentativa = 1;
+  let delayAtual = delayInicial;
+
+  while (tentativa <= tentativasMaximas) {
+    try {
+      return await requisicao();
+    } catch (error: any) {
+      const statusCode = error.response?.status;
+      const ehRateLimiting = statusCode === 429;
+
+      if (ehRateLimiting && tentativa < tentativasMaximas) {
+        const tempoEsperaSegundos = Math.ceil(delayAtual / 1000);
+        console.log(
+          `[${new Date().toLocaleString("pt-BR")}] ⚠️  Rate limiting detectado em ${nomeRequisicao}. ` +
+          `Tentativa ${tentativa}/${tentativasMaximas}. Aguardando ${tempoEsperaSegundos}s antes de tentar novamente...`
+        );
+        
+        await new Promise((resolve) => setTimeout(resolve, delayAtual));
+        delayAtual *= 2; // Backoff exponencial
+        tentativa++;
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  throw new Error(`${nomeRequisicao} falhou após ${tentativasMaximas} tentativas`);
+}
+
 // ============ FUNÇÕES DE AUTENTICAÇÃO ============
 async function renovarAccessTokenBling(): Promise<string> {
   try {
@@ -73,17 +113,22 @@ async function obterEstoqueBlingSimples(accessToken: string, limit: number = 100
     // Loop através de todas as páginas
     while (true) {
       const url = `${BLING_API_BASE}/produtos`;
-      const response = await axios.get(url, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          Accept: "application/json",
-        },
-        params: {
-          offset,
-          limit,
-        },
-        timeout: 30000,
-      });
+      const response = await fazerRequisicaoComRetry(
+        () => axios.get(url, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: "application/json",
+          },
+          params: {
+            offset,
+            limit,
+          },
+          timeout: 30000,
+        }),
+        `Busca de produtos (página ${numeroPagina})`,
+        3,
+        1000
+      );
 
       const dados = response.data.data || [];
 
@@ -177,17 +222,22 @@ async function obterProdutosBling(accessToken: string, limit: number = 50): Prom
       );
 
       const url = `${BLING_API_BASE}/produtos`;
-      const response = await axios.get(url, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          Accept: "application/json",
-        },
-        params: {
-          offset,
-          limit,
-        },
-        timeout: 30000, // 30 segundos de timeout
-      });
+      const response = await fazerRequisicaoComRetry(
+        () => axios.get(url, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: "application/json",
+          },
+          params: {
+            offset,
+            limit,
+          },
+          timeout: 30000, // 30 segundos de timeout
+        }),
+        `Busca de produtos (página ${pagina})`,
+        3,
+        1000
+      );
 
       const dados = response.data.data || [];
       console.log(
@@ -232,12 +282,17 @@ async function obterEstoqueProduto(
 ): Promise<number> {
   try {
     const url = `${BLING_API_BASE}/produtos/${produtoId}/estoques`;
-    const response = await axios.get(url, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: "application/json",
-      },
-    });
+    const response = await fazerRequisicaoComRetry(
+      () => axios.get(url, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: "application/json",
+        },
+      }),
+      `Obter estoque do produto ${produtoId}`,
+      3,
+      500
+    );
 
     const estoques = response.data.data || [];
     

@@ -56,6 +56,46 @@ let supabase: ReturnType<typeof createClient>;
 // Cache para SKU
 let skuCache: { [key: string]: number } = {};
 
+// ============ FUNÇÕES AUXILIARES DE REQUISIÇÃO ============
+/**
+ * Função auxiliar para fazer requisições com retry automático em caso de rate limiting (429)
+ * Implementa backoff exponencial para respeitar os limites da API
+ */
+async function fazerRequisicaoComRetry<T>(
+  requisicao: () => Promise<T>,
+  nomeRequisicao: string,
+  tentativasMaximas: number = 5,
+  delayInicial: number = 1000
+): Promise<T> {
+  let tentativa = 1;
+  let delayAtual = delayInicial;
+
+  while (tentativa <= tentativasMaximas) {
+    try {
+      return await requisicao();
+    } catch (error: any) {
+      const statusCode = error.response?.status;
+      const ehRateLimiting = statusCode === 429;
+
+      if (ehRateLimiting && tentativa < tentativasMaximas) {
+        const tempoEsperaSegundos = Math.ceil(delayAtual / 1000);
+        console.log(
+          `[${new Date().toLocaleString("pt-BR")}] ⚠️  Rate limiting detectado em ${nomeRequisicao}. ` +
+          `Tentativa ${tentativa}/${tentativasMaximas}. Aguardando ${tempoEsperaSegundos}s antes de tentar novamente...`
+        );
+        
+        await new Promise((resolve) => setTimeout(resolve, delayAtual));
+        delayAtual *= 2; // Backoff exponencial
+        tentativa++;
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  throw new Error(`${nomeRequisicao} falhou após ${tentativasMaximas} tentativas`);
+}
+
 // ============ FUNÇÕES DE TOKEN ============
 async function obterAccessToken(): Promise<string> {
   try {
@@ -77,9 +117,14 @@ async function obterAccessToken(): Promise<string> {
 // ============ FUNÇÕES DE API ============
 async function obterDetalhesEnvio(shipmentId: string, accessToken: string): Promise<string> {
   try {
-    const response = await axios.get(`https://api.mercadolibre.com/shipments/${shipmentId}`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
+    const response = await fazerRequisicaoComRetry(
+      () => axios.get(`https://api.mercadolibre.com/shipments/${shipmentId}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }),
+      `Obter detalhes do envio ${shipmentId}`,
+      3,
+      500
+    );
     return response.data.logistic_type || "Desconhecido";
   } catch (error) {
     console.error(`❌ Erro ao obter detalhes do envio ${shipmentId}`);
@@ -89,11 +134,16 @@ async function obterDetalhesEnvio(shipmentId: string, accessToken: string): Prom
 
 async function obterFrete(shipmentId: string, accessToken: string): Promise<number> {
   try {
-    const response = await axios.get(
-      `https://api.mercadolibre.com/shipments/${shipmentId}/costs`,
-      {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      }
+    const response = await fazerRequisicaoComRetry(
+      () => axios.get(
+        `https://api.mercadolibre.com/shipments/${shipmentId}/costs`,
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }
+      ),
+      `Obter custo de envio ${shipmentId}`,
+      3,
+      500
     );
     return response.data?.senders?.[0]?.save || 0;
   } catch (error) {
@@ -117,7 +167,12 @@ async function obterPedidos(
 
     while (true) {
       const url = `${urlBase}&date_created_from=${dateFrom}&date_created_to=${dateTo}&offset=${offset}&limit=${limit}`;
-      const response = await axios.get(url, { headers });
+      const response = await fazerRequisicaoComRetry(
+        () => axios.get(url, { headers }),
+        `Buscar pedidos (offset: ${offset})`,
+        3,
+        1000
+      );
 
       const currentOrders = response.data.results || [];
       if (!currentOrders.length) break;
@@ -125,8 +180,8 @@ async function obterPedidos(
       orders = orders.concat(currentOrders);
       offset += limit;
 
-      // Rate limit
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Rate limit: aguardar 1 segundo entre requisições
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
 
     console.log(`[${new Date().toLocaleString("pt-BR")}] ✅ ${orders.length} pedidos obtidos`);
@@ -341,6 +396,9 @@ export async function executarSincronizacaoVendas(): Promise<void> {
       const shipmentId = order.shipping?.id || "";
       const logisticType = await obterDetalhesEnvio(shipmentId, accessToken);
       const frete = await obterFrete(shipmentId, accessToken);
+
+      // Aguardar um pouco entre requisições para evitar rate limiting
+      await new Promise((resolve) => setTimeout(resolve, 200));
 
       // Determinar tipo de envio e CTL
       let tipoEnvio = "DESCONHECIDO";
