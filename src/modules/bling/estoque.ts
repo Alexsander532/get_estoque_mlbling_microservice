@@ -1,11 +1,30 @@
+/**
+ * ================================================================================
+ * MÓDULO DE SINCRONIZAÇÃO BLING - ESTOQUE
+ * ================================================================================
+ * 
+ * AUTENTICAÇÃO:
+ * ─────────────
+ * Este módulo NÃO faz renovação automática de token.
+ * 
+ * • Usa BLING_ACCESS_TOKEN fixo do Railway
+ * • Quando expirar (401/403): loga erro + instruções para renovar manualmente
+ * • Você deve atualizar o token no Railway quando necessário
+ * 
+ * COMO RENOVAR TOKEN MANUALMENTE:
+ * ────────────────────────────────
+ * 1. POST https://www.bling.com.br/Api/v3/oauth/token
+ * 2. Headers: Authorization: Basic [base64(clientId:clientSecret)]
+ * 3. Body: grant_type=refresh_token
+ *          refresh_token=SEU_REFRESH_TOKEN
+ *          redirect_uri=https://www.bling.com.br
+ * 4. Atualize BLING_ACCESS_TOKEN no Railway com novo token recebido
+ * 
+ * ================================================================================
+ */
+
 import axios from "axios";
 import { createClient } from "@supabase/supabase-js";
-import {
-  renovarAccessTokenBling,
-  obterAccessTokenValidoBling,
-  logErroTokenExpirado,
-  obterTimestamp,
-} from "./bling-auth.js";
 
 interface BlingProduto {
   id: string;
@@ -34,20 +53,56 @@ interface EstoqueRow {
   updated_at: string;
 }
 
-const BLING_CLIENT_ID = process.env.BLING_CLIENT_ID || "";
-const BLING_CLIENT_SECRET = process.env.BLING_CLIENT_SECRET || "";
 const BLING_ACCESS_TOKEN = process.env.BLING_ACCESS_TOKEN || "";
-const BLING_REFRESH_TOKEN = process.env.BLING_REFRESH_TOKEN || "";
 const BLING_API_BASE = "https://api.bling.com.br/v3";
-const BLING_OAUTH_URL = "https://api.bling.com.br/oauth/authorize";
 
 let supabase: ReturnType<typeof createClient>;
-let currentAccessToken = BLING_ACCESS_TOKEN;
+
+// ============ FUNÇÕES AUXILIARES ============
+
+/**
+ * Obtém timestamp formatado em padrão brasileiro
+ */
+function obterTimestamp(): string {
+  const agora = new Date();
+  const dia = String(agora.getDate()).padStart(2, "0");
+  const mes = String(agora.getMonth() + 1).padStart(2, "0");
+  const ano = agora.getFullYear();
+  const horas = String(agora.getHours()).padStart(2, "0");
+  const minutos = String(agora.getMinutes()).padStart(2, "0");
+  const segundos = String(agora.getSeconds()).padStart(2, "0");
+
+  return `${dia}/${mes}/${ano} ${horas}:${minutos}:${segundos}`;
+}
+
+/**
+ * Loga mensagem de erro crítico quando token expira
+ */
+function logErroTokenExpirado(): void {
+  console.error(`\n${"=".repeat(80)}`);
+  console.error(`❌ ERRO CRÍTICO: TOKEN BLING EXPIRADO`);
+  console.error(`${"=".repeat(80)}\n`);
+  console.error(`⚠️  O access token configurado no Railway está EXPIRADO.\n`);
+  console.error(`💡 COMO CORRIGIR:\n`);
+  console.error(`   1. Acesse: https://www.bling.com.br/Api/v3/oauth/token`);
+  console.error(`   2. Faça POST com:`);
+  console.error(`      • Headers: Authorization: Basic [base64(clientId:clientSecret)]`);
+  console.error(`      • Body: grant_type=refresh_token`);
+  console.error(`              refresh_token=SEU_REFRESH_TOKEN`);
+  console.error(`              redirect_uri=https://www.bling.com.br`);
+  console.error(`   3. Copie o novo access_token da resposta`);
+  console.error(`   4. Atualize no Railway → Variables → BLING_ACCESS_TOKEN\n`);
+  console.error(`   ⚠️  IMPORTANTE: Sistema NÃO renova token automaticamente!`);
+  console.error(`      Você deve atualizar manualmente quando expirar.\n`);
+  console.error(`${"=".repeat(80)}\n`);
+}
 
 // ============ FUNÇÕES AUXILIARES DE REQUISIÇÃO ============
 /**
- * Função auxiliar para fazer requisições com retry automático em caso de rate limiting (429)
- * Implementa backoff exponencial para respeitar os limites da API
+ * Função auxiliar para fazer requisições Bling com retry em caso de rate limiting
+ * NÃO faz renovação automática de token - apenas retenta em caso de 429
+ * 
+ * Em caso de 401/403: loga erro crítico e para execução
  */
 async function fazerRequisicaoComRetry<T>(
   requisicao: () => Promise<T>,
@@ -63,129 +118,47 @@ async function fazerRequisicaoComRetry<T>(
       return await requisicao();
     } catch (error: any) {
       const statusCode = error.response?.status;
-      const ehRateLimiting = statusCode === 429;
 
-      if (ehRateLimiting && tentativa < tentativasMaximas) {
-        const tempoEsperaSegundos = Math.ceil(delayAtual / 1000);
-        console.log(
-          `[${obterTimestamp()}] ⚠️  Rate limiting detectado em ${nomeRequisicao}. ` +
-          `Tentativa ${tentativa}/${tentativasMaximas}. Aguardando ${tempoEsperaSegundos}s antes de tentar novamente...`
+      // Token expirado (401/403) - logar erro e parar
+      if (statusCode === 401 || statusCode === 403) {
+        console.error(
+          `\n[${obterTimestamp()}] ❌ Token BLING expirado/inválido (${statusCode})`
         );
-        
-        await new Promise((resolve) => setTimeout(resolve, delayAtual));
-        delayAtual *= 2; // Backoff exponencial
-        tentativa++;
-      } else {
-        throw error;
-      }
-    }
-  }
-
-  throw new Error(`${nomeRequisicao} falhou após ${tentativasMaximas} tentativas`);
-}
-
-// ============ FUNÇÕES DE AUTENTICAÇÃO ============
-// Funções de autenticação foram movidas para bling-auth.ts
-// Use: await renovarAccessTokenBling() para renovar automaticamente com refresh token
-
-/**
- * Wrapper para requisições que detecta 401 e tenta renovar token automaticamente
- * 
- * Se receber 401:
- * 1. Tenta renovar com refresh_token
- * 2. Se sucesso: atualiza currentAccessToken e retorna novo token
- * 3. Se falha: loga erro crítico e retorna null
- */
-async function obterAccessTokenComRenovacao(): Promise<string | null> {
-  try {
-    // Tentar com token atual
-    return currentAccessToken;
-  } catch (error: any) {
-    if (error.response?.status === 401) {
-      console.log(
-        `[${obterTimestamp()}] 🔄 Token expirado (401)! Tentando renovar com refresh_token...`
-      );
-      
-      const novoToken = await renovarAccessTokenBling();
-      
-      if (novoToken) {
-        currentAccessToken = novoToken.accessToken;
-        console.log(
-          `[${obterTimestamp()}] ✅ Token renovado com sucesso! Use o novo access_token:`
-        );
-        console.log(`   BLING_ACCESS_TOKEN = ${novoToken.accessToken}`);
-        console.log(`   BLING_REFRESH_TOKEN = ${novoToken.refreshToken}`);
-        return currentAccessToken;
-      } else {
         logErroTokenExpirado();
-        return null;
-      }
-    }
-    throw error;
-  }
-}
-
-/**
- * Wrapper para requisições que intercepta 401 e tenta renovar automaticamente
- * Se conseguir renovar, tenta a requisição novamente com novo token
- */
-async function fazerRequisicaoComRenovacao<T>(
-  requisicao: (token: string) => Promise<T>,
-  nomeRequisicao: string,
-  tentativasMaximas: number = 5,
-  delayInicial: number = 1000
-): Promise<T> {
-  let tentativa = 1;
-  let delayAtual = delayInicial;
-  let jaRenovouToken = false;
-
-  while (tentativa <= tentativasMaximas) {
-    try {
-      return await requisicao(currentAccessToken);
-    } catch (error: any) {
-      const statusCode = error.response?.status;
-
-      // Se receber 401 (Unauthorized) e ainda não tentou renovar
-      if (statusCode === 401 && !jaRenovouToken) {
-        console.log(
-          `[${obterTimestamp()}] 🔄 Token expirado em ${nomeRequisicao}! Tentando renovar...`
-        );
-
-        const novoToken = await renovarAccessTokenBling();
-
-        if (novoToken) {
-          currentAccessToken = novoToken.accessToken;
-          jaRenovouToken = true;
-          console.log(
-            `[${obterTimestamp()}] ✅ Token renovado! Tentando requisição novamente...`
-          );
-          // Não incrementa tentativa, tenta novamente com novo token
-          continue;
-        } else {
-          logErroTokenExpirado();
-          throw new Error("Não foi possível renovar o token. Ambos tokens expiraram.");
-        }
+        throw new Error(`Token Bling expirado. Atualize BLING_ACCESS_TOKEN no Railway.`);
       }
 
       // Rate limiting (429)
-      const ehRateLimiting = statusCode === 429;
-      if (ehRateLimiting && tentativa < tentativasMaximas) {
-        const tempoEsperaSegundos = Math.ceil(delayAtual / 1000);
-        console.log(
-          `[${obterTimestamp()}] ⚠️  Rate limiting em ${nomeRequisicao}. ` +
-          `Tentativa ${tentativa}/${tentativasMaximas}. Aguardando ${tempoEsperaSegundos}s...`
+      if (statusCode === 429) {
+        if (tentativa < tentativasMaximas) {
+          console.log(
+            `[${obterTimestamp()}] ⏳ Rate limit (429) em ${nomeRequisicao}. Aguardando ${delayAtual}ms antes da tentativa ${tentativa + 1}/${tentativasMaximas}...`
+          );
+          await aguardar(delayAtual);
+          delayAtual *= 2; // Exponential backoff
+          tentativa++;
+          continue;
+        }
+        throw new Error(
+          `Rate limit (429) excedido após ${tentativasMaximas} tentativas em ${nomeRequisicao}`
         );
-        
-        await new Promise((resolve) => setTimeout(resolve, delayAtual));
-        delayAtual *= 2;
-        tentativa++;
-      } else {
-        throw error;
       }
+
+      // Outros erros
+      throw error;
     }
   }
 
-  throw new Error(`${nomeRequisicao} falhou após ${tentativasMaximas} tentativas`);
+  throw new Error(
+    `Falha em ${nomeRequisicao} após ${tentativasMaximas} tentativas`
+  );
+}
+
+async function aguardar(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+async function aguardar(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // ============ FUNÇÕES DE API BLING ============
@@ -199,16 +172,17 @@ async function obterEstoqueBlingSimples(accessToken: string, limit: number = 100
     let produtosRepetidos = 0;
 
     console.log(
-      `[${obterTimestamp()}] 🚀 Buscando todos os produtos da Bling com detecção de repetição...`
+      `[${obterTimestamp()}] 🚀 Buscando todos os produtos da Bling...`
     );
 
     // Loop através de todas as páginas
     while (true) {
       const url = `${BLING_API_BASE}/produtos`;
-      const response = await fazerRequisicaoComRenovacao(
-        (token) => axios.get(url, {
+      
+      const response = await fazerRequisicaoComRetry(
+        () => axios.get(url, {
           headers: {
-            Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${accessToken}`,
             Accept: "application/json",
           },
           params: {
@@ -569,18 +543,11 @@ export async function executarSincronizacaoBling(): Promise<void> {
   );
 
   try {
-    // Renovar access token
-    const tokenResult = await renovarAccessTokenBling();
-    
-    if (!tokenResult || !tokenResult.accessToken) {
-      logErroTokenExpirado();
-      return;
-    }
+    // Usar token diretamente (sem renovação automática)
+    console.log(`[${obterTimestamp()}] 🔑 Usando BLING_ACCESS_TOKEN do Railway...`);
 
-    const accessToken = tokenResult.accessToken;
-
-    // Obter estoque da Bling (com detecção de paginação infinita)
-    const estoquesBling = await obterEstoqueBlingSimples(accessToken, 100);
+    // Obter estoque da Bling
+    const estoquesBling = await obterEstoqueBlingSimples(BLING_ACCESS_TOKEN, 100);
 
     if (estoquesBling.size === 0) {
       console.log(
@@ -655,22 +622,13 @@ export async function testarConexaoBling(): Promise<void> {
 
     console.log(`✅ Credenciais encontradas\n`);
 
-    // Renovar token (em produção)
-    console.log(`🔄 Validando access token...`);
-    const tokenResult = await renovarAccessTokenBling();
-    
-    if (!tokenResult || !tokenResult.accessToken) {
-      logErroTokenExpirado();
-      return;
-    }
-    
-    const novoToken = tokenResult.accessToken;
-    console.log(`✅ Token validado\n`);
+    // Usar token diretamente (sem renovação)
+    console.log(`🔑 Usando BLING_ACCESS_TOKEN do Railway...\n`);
 
     // Buscar todos os SKUs com suas quantidades
     console.log(`📦 Buscando todos os produtos...\n`);
     const inicio = Date.now();
-    const estoques = await obterEstoqueBlingSimples(novoToken, 100);
+    const estoques = await obterEstoqueBlingSimples(BLING_ACCESS_TOKEN, 100);
     const duracao = ((Date.now() - inicio) / 1000).toFixed(2);
 
     // Exibir resultados
