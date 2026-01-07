@@ -157,9 +157,6 @@ async function fazerRequisicaoComRetry<T>(
 async function aguardar(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
-async function aguardar(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 // ============ FUNÇÕES DE API BLING ============
 async function obterEstoqueBlingSimples(accessToken: string, limit: number = 100): Promise<Map<string, number>> {
@@ -288,10 +285,10 @@ async function obterProdutosBling(accessToken: string, limit: number = 50): Prom
       );
 
       const url = `${BLING_API_BASE}/produtos`;
-      const response = await fazerRequisicaoComRenovacao(
-        (token) => axios.get(url, {
+      const response = await fazerRequisicaoComRetry(
+        () => axios.get(url, {
           headers: {
-            Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${BLING_ACCESS_TOKEN}`,
             Accept: "application/json",
           },
           params: {

@@ -636,8 +636,14 @@ async function validarAutenticacaoMagalu(): Promise<boolean> {
 // ─────────────────────────────────────────────────────────────────────────
 /**
  * Sincroniza dados de ESTOQUE do Magalu (FLUXO COMPLETO em 4 ETAPAS)
- * 
- *const tempoInicioEstoque = Date.now();
+ */
+async function sincronizarMagaluEstoque(): Promise<void> {
+  console.log(`\n${"─".repeat(80)}`);
+  console.log(`📦 MAGALU - Sincronizando ESTOQUE (4 ETAPAS COMPLETAS)`);
+  console.log(`${"─".repeat(80)}`);
+  console.log(`   Será executado o fluxo completo em 4 etapas...`);
+
+  const tempoInicioEstoque = Date.now();
 
   try {
     await executarSincronizacaoEstoqueMaguluCompleta();
@@ -661,22 +667,29 @@ async function validarAutenticacaoMagalu(): Promise<boolean> {
     resultadosCiclo.magalu.status = "erro";
     resultadosCiclo.magalu.erro = mensagemErro;
     resultadosCiclo.magalu.erroDetalhado = erroDetalhado;
-    resultadosCiclo.magalu.orientacao = orientacao
-    // A função executarSincronizacaoEstoqueMaguluCompleta já orquestra as 4 etapas internamente
-    // Inclui: SKUs API → BD → Estoques API → BD
-    await executarSincronizacaoEstoqueMaguluCompleta();
-    console.log(`✅ MAGALU ESTOQUE: Sincronização completa (4 etapas)!\n`);
-    
-    if (resultadosCiclo.magalu.status !== "erro") {
-      resultadosCiclo.magalu.modulosExecutados!.push("Estoque (4 etapas)");
-    }
-  } catch (error) {
-    const mensagemErro = error instanceof Error ? error.message : String(error);
-    console.error(`\n❌ ERRO em Magalu Estoque:`, mensagemErro);
-    console.error(`⚠️  Continuando com próximos marketplaces...\n`);
-    
-    // Registrar erro no relatório
-    resultadosCiclo.magalu.status = "erro";
+    resultadosCiclo.magalu.orientacao = orientacao;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 3.6 MAGALU - Sincronizar Vendas
+// ─────────────────────────────────────────────────────────────────────────
+/**
+ * Sincroniza dados de VENDAS do Magalu
+ * 
+ * Sequência:
+ * 1. Busca pedidos do mês atual na API Magalu (com paginação)
+ * 2. Verifica quais já foram sincronizados
+ * 3. Insere novas vendas no banco de dados
+ * 4. Calcula margens e lucros
+ * 
+ * Tempo estimado: ~5-15 segundos (dependendo da quantidade de vendas)
+ */
+async function sincronizarMagaluVendas(): Promise<void> {
+  console.log(`\n${"─".repeat(80)}`);
+  console.log(`📦 MAGALU - Sincronizando VENDAS`);
+  console.log(`${"─".repeat(80)}`);
+
   const tempoInicioVendas = Date.now();
 
   try {
@@ -705,31 +718,7 @@ async function validarAutenticacaoMagalu(): Promise<boolean> {
       resultadosCiclo.magalu.status = "erro";
       resultadosCiclo.magalu.erro = mensagemErro;
       resultadosCiclo.magalu.erroDetalhado = erroDetalhado;
-      resultadosCiclo.magalu.orientacao = orientacao
-async function sincronizarMagaluVendas(): Promise<void> {
-  console.log(`\n${"─".repeat(80)}`);
-  console.log(`📦 MAGALU - Sincronizando VENDAS`);
-  console.log(`${"─".repeat(80)}`);
-
-  try {
-    console.log(`   ▶️  Sincronizando VENDAS (período: mês atual)...`);
-    await executarSincronizacaoVendasMagalu();
-    console.log(`✅ MAGALU VENDAS: Vendas sincronizadas com sucesso!\n`);
-    
-    if (resultadosCiclo.magalu.status !== "erro") {
-      resultadosCiclo.magalu.modulosExecutados!.push("Vendas");
-      resultadosCiclo.magalu.status = "sucesso";
-    }
-  } catch (error) {
-    const mensagemErro = error instanceof Error ? error.message : String(error);
-    console.error(`\n❌ ERRO em Magalu Vendas:`, mensagemErro);
-    console.error(`⚠️  Continuando...\n`);
-    
-    // Registrar erro no relatório (se não houver erro anterior)
-    if (resultadosCiclo.magalu.status !== "erro") {
-      resultadosCiclo.magalu.status = "erro";
-      resultadosCiclo.magalu.erro = mensagemErro;
-      resultadosCiclo.magalu.orientacao = obterOrientacaoErro(error, "Magalu");
+      resultadosCiclo.magalu.orientacao = orientacao;
     }
   }
 }
