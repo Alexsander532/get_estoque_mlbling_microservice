@@ -570,7 +570,14 @@ export async function executarSincronizacaoBling(): Promise<void> {
 
   try {
     // Renovar access token
-    const accessToken = await renovarAccessTokenBling();
+    const tokenResult = await renovarAccessTokenBling();
+    
+    if (!tokenResult || !tokenResult.accessToken) {
+      logErroTokenExpirado();
+      return;
+    }
+
+    const accessToken = tokenResult.accessToken;
 
     // Obter estoque da Bling (com detecção de paginação infinita)
     const estoquesBling = await obterEstoqueBlingSimples(accessToken, 100);
@@ -650,7 +657,14 @@ export async function testarConexaoBling(): Promise<void> {
 
     // Renovar token (em produção)
     console.log(`🔄 Validando access token...`);
-    const novoToken = await renovarAccessTokenBling();
+    const tokenResult = await renovarAccessTokenBling();
+    
+    if (!tokenResult || !tokenResult.accessToken) {
+      logErroTokenExpirado();
+      return;
+    }
+    
+    const novoToken = tokenResult.accessToken;
     console.log(`✅ Token validado\n`);
 
     // Buscar todos os SKUs com suas quantidades
