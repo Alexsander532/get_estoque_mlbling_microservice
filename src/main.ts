@@ -599,36 +599,78 @@ async function sincronizarBling(): Promise<void> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// 3.3 MAGALU - Validar Autenticação (Renovar token se necessário)
-// ─────────────────────────────────────────────────────────────────────────
+// ============================================================================
+// SISTEMA DE ROTAÇÃO DE TOKEN MAGALU (A CADA 3 EXECUÇÕES)
+// ============================================================================
+/**
+ * Sistema de renovação em ciclos de 3 execuções:
+ * 
+ * Execução 1: Usa token do Railway
+ * Execução 2: Usa token do Railway
+ * Execução 3: Usa token do Railway + RENOVA para novo ciclo
+ * Execução 4: Usa novo token do Railway
+ * ...e assim por diante
+ * 
+ * Total: A cada 3 execuções (~1.5 horas com intervalo de 30min)
+ */
+let contadorExecucoesMagalu = 0;
 
 /**
  * Valida autenticação Magalu antes de sincronizar
  * 
- * Processo:
- * 1. Obtém token do .env
- * 2. Testa se funciona
- * 3. Se falha: tenta renovar com refresh token
- * 4. Se renovação funciona: retorna novo token
- * 5. Se falha: loga erro crítico pedindo atualizar manualmente
+ * Implementa sistema de rotação:
+ * - Usa token do Railway 3 vezes
+ * - Na 3ª execução, renova o token
+ * - Repete o ciclo
  * 
- * Sem banco de dados - tudo baseado em variáveis de ambiente (como Bling)
+ * Processo:
+ * 1. Incrementa contador de execuções
+ * 2. Se divisível por 3: renova token
+ * 3. Testa token atual
+ * 4. Se falha: tenta renovar (fora do ciclo)
+ * 5. Se sucesso: continua sincronização
+ * 
+ * Sem banco de dados - tudo baseado em variáveis de ambiente
  */
 async function validarAutenticacaoMagalu(): Promise<boolean> {
   console.log(`\n${"─".repeat(80)}`);
-  console.log(`🔐 AUTENTICAÇÃO MAGALU`);
+  console.log(`🔐 AUTENTICAÇÃO MAGALU - Sistema de Rotação`);
   console.log(`${"─".repeat(80)}`);
 
-  const tokenValido = await obterAccessTokenMagalu();
+  // Incrementar contador de execuções
+  contadorExecucoesMagalu++;
+  console.log(`📊 Execução #${contadorExecucoesMagalu} do ciclo de 3`);
 
-  if (!tokenValido) {
-    console.log(`\n⏸️  MAGALU: Tokens inválidos, pulando sincronizações\n`);
-    return false;
+  // A cada 3 execuções, renovar token
+  if (contadorExecucoesMagalu % 3 === 0) {
+    console.log(`\n🔄 RENOVANDO TOKEN (execução #3 do ciclo)...`);
+    try {
+      const tokenValido = await obterAccessTokenMagalu();
+      if (tokenValido) {
+        console.log(`✅ Token renovado com sucesso!`);
+        console.log(`🔄 Iniciando novo ciclo de 3 execuções...\n`);
+        return true;
+      } else {
+        console.log(`❌ Falha ao renovar token\n`);
+        return false;
+      }
+    } catch (error) {
+      console.error(`❌ Erro ao renovar:`, error instanceof Error ? error.message : error);
+      return false;
+    }
+  } else {
+    // Não é hora de renovar, apenas validar token
+    console.log(`✅ Usando token do Railway (execução ${contadorExecucoesMagalu % 3}/3)`);
+    
+    const tokenValido = await obterAccessTokenMagalu();
+    if (!tokenValido) {
+      console.log(`\n⏸️  MAGALU: Token inválido, pulando sincronizações\n`);
+      return false;
+    }
+
+    console.log(`✅ MAGALU: Autenticação OK, continuando...\n`);
+    return true;
   }
-
-  console.log(`\n✅ MAGALU: Autenticação OK, continuando...\n`);
-  return true;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
