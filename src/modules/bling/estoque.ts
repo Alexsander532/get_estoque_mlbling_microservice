@@ -1,5 +1,11 @@
 import axios from "axios";
 import { createClient } from "@supabase/supabase-js";
+import {
+  renovarAccessTokenBling,
+  obterAccessTokenValidoBling,
+  logErroTokenExpirado,
+  obterTimestamp,
+} from "./bling-auth.js";
 
 interface BlingProduto {
   id: string;
@@ -62,7 +68,7 @@ async function fazerRequisicaoComRetry<T>(
       if (ehRateLimiting && tentativa < tentativasMaximas) {
         const tempoEsperaSegundos = Math.ceil(delayAtual / 1000);
         console.log(
-          `[${new Date().toLocaleString("pt-BR")}] ⚠️  Rate limiting detectado em ${nomeRequisicao}. ` +
+          `[${obterTimestamp()}] ⚠️  Rate limiting detectado em ${nomeRequisicao}. ` +
           `Tentativa ${tentativa}/${tentativasMaximas}. Aguardando ${tempoEsperaSegundos}s antes de tentar novamente...`
         );
         
@@ -79,21 +85,107 @@ async function fazerRequisicaoComRetry<T>(
 }
 
 // ============ FUNÇÕES DE AUTENTICAÇÃO ============
-async function renovarAccessTokenBling(): Promise<string> {
+// Funções de autenticação foram movidas para bling-auth.ts
+// Use: await renovarAccessTokenBling() para renovar automaticamente com refresh token
+
+/**
+ * Wrapper para requisições que detecta 401 e tenta renovar token automaticamente
+ * 
+ * Se receber 401:
+ * 1. Tenta renovar com refresh_token
+ * 2. Se sucesso: atualiza currentAccessToken e retorna novo token
+ * 3. Se falha: loga erro crítico e retorna null
+ */
+async function obterAccessTokenComRenovacao(): Promise<string | null> {
   try {
-    // Usar o token fornecido - na prática, você precisaria renovar via código de autorização
-    // Por enquanto, usaremos o token atual armazenado em .env
-    console.log(
-      `[${new Date().toLocaleString("pt-BR")}] ✅ Access token Bling validado (token atual)`
-    );
+    // Tentar com token atual
     return currentAccessToken;
-  } catch (error) {
-    console.error(
-      `[${new Date().toLocaleString("pt-BR")}] ❌ Erro ao renovar access token Bling:`,
-      error
-    );
+  } catch (error: any) {
+    if (error.response?.status === 401) {
+      console.log(
+        `[${obterTimestamp()}] 🔄 Token expirado (401)! Tentando renovar com refresh_token...`
+      );
+      
+      const novoToken = await renovarAccessTokenBling();
+      
+      if (novoToken) {
+        currentAccessToken = novoToken.accessToken;
+        console.log(
+          `[${obterTimestamp()}] ✅ Token renovado com sucesso! Use o novo access_token:`
+        );
+        console.log(`   BLING_ACCESS_TOKEN = ${novoToken.accessToken}`);
+        console.log(`   BLING_REFRESH_TOKEN = ${novoToken.refreshToken}`);
+        return currentAccessToken;
+      } else {
+        logErroTokenExpirado();
+        return null;
+      }
+    }
     throw error;
   }
+}
+
+/**
+ * Wrapper para requisições que intercepta 401 e tenta renovar automaticamente
+ * Se conseguir renovar, tenta a requisição novamente com novo token
+ */
+async function fazerRequisicaoComRenovacao<T>(
+  requisicao: (token: string) => Promise<T>,
+  nomeRequisicao: string,
+  tentativasMaximas: number = 5,
+  delayInicial: number = 1000
+): Promise<T> {
+  let tentativa = 1;
+  let delayAtual = delayInicial;
+  let jaRenovouToken = false;
+
+  while (tentativa <= tentativasMaximas) {
+    try {
+      return await requisicao(currentAccessToken);
+    } catch (error: any) {
+      const statusCode = error.response?.status;
+
+      // Se receber 401 (Unauthorized) e ainda não tentou renovar
+      if (statusCode === 401 && !jaRenovouToken) {
+        console.log(
+          `[${obterTimestamp()}] 🔄 Token expirado em ${nomeRequisicao}! Tentando renovar...`
+        );
+
+        const novoToken = await renovarAccessTokenBling();
+
+        if (novoToken) {
+          currentAccessToken = novoToken.accessToken;
+          jaRenovouToken = true;
+          console.log(
+            `[${obterTimestamp()}] ✅ Token renovado! Tentando requisição novamente...`
+          );
+          // Não incrementa tentativa, tenta novamente com novo token
+          continue;
+        } else {
+          logErroTokenExpirado();
+          throw new Error("Não foi possível renovar o token. Ambos tokens expiraram.");
+        }
+      }
+
+      // Rate limiting (429)
+      const ehRateLimiting = statusCode === 429;
+      if (ehRateLimiting && tentativa < tentativasMaximas) {
+        const tempoEsperaSegundos = Math.ceil(delayAtual / 1000);
+        console.log(
+          `[${obterTimestamp()}] ⚠️  Rate limiting em ${nomeRequisicao}. ` +
+          `Tentativa ${tentativa}/${tentativasMaximas}. Aguardando ${tempoEsperaSegundos}s...`
+        );
+        
+        await new Promise((resolve) => setTimeout(resolve, delayAtual));
+        delayAtual *= 2;
+        tentativa++;
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  throw new Error(`${nomeRequisicao} falhou após ${tentativasMaximas} tentativas`);
 }
 
 // ============ FUNÇÕES DE API BLING ============
@@ -107,16 +199,16 @@ async function obterEstoqueBlingSimples(accessToken: string, limit: number = 100
     let produtosRepetidos = 0;
 
     console.log(
-      `[${new Date().toLocaleString("pt-BR")}] 🚀 Buscando todos os produtos da Bling com detecção de repetição...`
+      `[${obterTimestamp()}] 🚀 Buscando todos os produtos da Bling com detecção de repetição...`
     );
 
     // Loop através de todas as páginas
     while (true) {
       const url = `${BLING_API_BASE}/produtos`;
-      const response = await fazerRequisicaoComRetry(
-        () => axios.get(url, {
+      const response = await fazerRequisicaoComRenovacao(
+        (token) => axios.get(url, {
           headers: {
-            Authorization: `Bearer ${accessToken}`,
+            Authorization: `Bearer ${token}`,
             Accept: "application/json",
           },
           params: {
@@ -135,7 +227,7 @@ async function obterEstoqueBlingSimples(accessToken: string, limit: number = 100
       // Se não tem dados, chegou ao fim
       if (dados.length === 0) {
         console.log(
-          `[${new Date().toLocaleString("pt-BR")}] ✅ Fim da paginação: array vazio na página ${numeroPagina}`
+          `[${obterTimestamp()}] ✅ Fim da paginação: array vazio na página ${numeroPagina}`
         );
         break;
       }
@@ -152,7 +244,7 @@ async function obterEstoqueBlingSimples(accessToken: string, limit: number = 100
       });
 
       console.log(
-        `[${new Date().toLocaleString("pt-BR")}] 📄 Página ${numeroPagina}: ${dados.length} produtos (offset: ${offset})`
+        `[${obterTimestamp()}] 📄 Página ${numeroPagina}: ${dados.length} produtos (offset: ${offset})`
       );
 
       // Verificar se os SKUs da página atual são iguais à página anterior
@@ -165,20 +257,20 @@ async function obterEstoqueBlingSimples(accessToken: string, limit: number = 100
         if (saoIguais) {
           produtosRepetidos++;
           console.log(
-            `[${new Date().toLocaleString("pt-BR")}] ⚠️  Página ${numeroPagina} tem os MESMOS produtos da página anterior (repetição #${produtosRepetidos})`
+            `[${obterTimestamp()}] ⚠️  Página ${numeroPagina} tem os MESMOS produtos da página anterior (repetição #${produtosRepetidos})`
           );
 
           // Se temos 2 páginas repetidas, para (bug confirmado)
           if (produtosRepetidos >= 2) {
             console.log(
-              `[${new Date().toLocaleString("pt-BR")}] 🛑 Detectada paginação infinita! Parando aqui.`
+              `[${obterTimestamp()}] 🛑 Detectada paginação infinita! Parando aqui.`
             );
             break;
           }
         } else {
           produtosRepetidos = 0; // Reset contador se encontrou produtos novos
           console.log(
-            `[${new Date().toLocaleString("pt-BR")}] ✨ Página ${numeroPagina} tem produtos NOVOS`
+            `[${obterTimestamp()}] ✨ Página ${numeroPagina} tem produtos NOVOS`
           );
         }
       }
@@ -193,16 +285,16 @@ async function obterEstoqueBlingSimples(accessToken: string, limit: number = 100
     }
 
     console.log(
-      `[${new Date().toLocaleString("pt-BR")}] ✅ Total de SKUs únicos carregados: ${estoques.size}`
+      `[${obterTimestamp()}] ✅ Total de SKUs únicos carregados: ${estoques.size}`
     );
     console.log(
-      `[${new Date().toLocaleString("pt-BR")}] 📊 Varridas ${numeroPagina - 1} páginas`
+      `[${obterTimestamp()}] 📊 Varridas ${numeroPagina - 1} páginas`
     );
 
     return estoques;
   } catch (error) {
     console.error(
-      `[${new Date().toLocaleString("pt-BR")}] ❌ Erro ao obter estoque Bling:`,
+      `[${obterTimestamp()}] ❌ Erro ao obter estoque Bling:`,
       error
     );
     return new Map();
@@ -218,14 +310,14 @@ async function obterProdutosBling(accessToken: string, limit: number = 50): Prom
 
     while (temMais) {
       console.log(
-        `[${new Date().toLocaleString("pt-BR")}] 📄 Buscando página ${pagina} (offset: ${offset}, limit: ${limit})...`
+        `[${obterTimestamp()}] 📄 Buscando página ${pagina} (offset: ${offset}, limit: ${limit})...`
       );
 
       const url = `${BLING_API_BASE}/produtos`;
-      const response = await fazerRequisicaoComRetry(
-        () => axios.get(url, {
+      const response = await fazerRequisicaoComRenovacao(
+        (token) => axios.get(url, {
           headers: {
-            Authorization: `Bearer ${accessToken}`,
+            Authorization: `Bearer ${token}`,
             Accept: "application/json",
           },
           params: {
@@ -241,16 +333,16 @@ async function obterProdutosBling(accessToken: string, limit: number = 50): Prom
 
       const dados = response.data.data || [];
       console.log(
-        `[${new Date().toLocaleString("pt-BR")}] 📦 Página ${pagina}: ${dados.length} produtos recebidos`
+        `[${obterTimestamp()}] 📦 Página ${pagina}: ${dados.length} produtos recebidos`
       );
 
       if (dados.length === 0) {
-        console.log(`[${new Date().toLocaleString("pt-BR")}] ✅ Fim da listagem de produtos`);
+        console.log(`[${obterTimestamp()}] ✅ Fim da listagem de produtos`);
         temMais = false;
       } else {
         produtos = produtos.concat(dados);
         console.log(
-          `[${new Date().toLocaleString("pt-BR")}] 📊 Total acumulado: ${produtos.length} produtos`
+          `[${obterTimestamp()}] 📊 Total acumulado: ${produtos.length} produtos`
         );
         offset += limit;
         pagina++;
@@ -258,18 +350,18 @@ async function obterProdutosBling(accessToken: string, limit: number = 50): Prom
 
       // Rate limit: máximo 120 requisições por minuto (aguardar 500ms)
       if (temMais) {
-        console.log(`[${new Date().toLocaleString("pt-BR")}] ⏳ Aguardando 500ms para respeitar rate limit...`);
+        console.log(`[${obterTimestamp()}] ⏳ Aguardando 500ms para respeitar rate limit...`);
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
     }
 
     console.log(
-      `[${new Date().toLocaleString("pt-BR")}] ✅ Total de ${produtos.length} produtos obtidos da Bling`
+      `[${obterTimestamp()}] ✅ Total de ${produtos.length} produtos obtidos da Bling`
     );
     return produtos;
   } catch (error) {
     console.error(
-      `[${new Date().toLocaleString("pt-BR")}] ❌ Erro ao obter produtos Bling:`,
+      `[${obterTimestamp()}] ❌ Erro ao obter produtos Bling:`,
       error
     );
     return [];
@@ -305,7 +397,7 @@ async function obterEstoqueProduto(
     return totalEstoque;
   } catch (error) {
     console.error(
-      `[${new Date().toLocaleString("pt-BR")}] ⚠️ Erro ao obter estoque do produto ${produtoId}:`,
+      `[${obterTimestamp()}] ⚠️ Erro ao obter estoque do produto ${produtoId}:`,
       error
     );
     return 0;
@@ -333,7 +425,7 @@ async function obterDadosEstoqueAtuais(): Promise<Map<string, { bling: number; f
     return mapa;
   } catch (error) {
     console.error(
-      `[${new Date().toLocaleString("pt-BR")}] ❌ Erro ao obter dados de estoque:`,
+      `[${obterTimestamp()}] ❌ Erro ao obter dados de estoque:`,
       error
     );
     return new Map();
@@ -372,14 +464,14 @@ async function sincronizarEstoqueBling(
 
           if (error) {
             console.error(
-              `[${new Date().toLocaleString("pt-BR")}] ❌ Erro ao atualizar SKU ${sku}:`,
+              `[${obterTimestamp()}] ❌ Erro ao atualizar SKU ${sku}:`,
               error
             );
             erro++;
           } else {
             atualizado++;
             console.log(
-              `[${new Date().toLocaleString("pt-BR")}] ✏️ Atualizado - SKU: ${sku} | Qtd: ${dadosAtuais.bling} → ${quantidadeBling}`
+              `[${obterTimestamp()}] ✏️ Atualizado - SKU: ${sku} | Qtd: ${dadosAtuais.bling} → ${quantidadeBling}`
             );
           }
         }
@@ -399,20 +491,20 @@ async function sincronizarEstoqueBling(
 
         if (error) {
           console.error(
-            `[${new Date().toLocaleString("pt-BR")}] ❌ Erro ao inserir SKU ${sku}:`,
+            `[${obterTimestamp()}] ❌ Erro ao inserir SKU ${sku}:`,
             error
           );
           erro++;
         } else {
           inserido++;
           console.log(
-            `[${new Date().toLocaleString("pt-BR")}] ➕ Novo - SKU: ${sku} | Qtd: ${quantidadeBling}`
+            `[${obterTimestamp()}] ➕ Novo - SKU: ${sku} | Qtd: ${quantidadeBling}`
           );
         }
       }
     } catch (error) {
       console.error(
-        `[${new Date().toLocaleString("pt-BR")}] ❌ Erro processando SKU ${sku}:`,
+        `[${obterTimestamp()}] ❌ Erro processando SKU ${sku}:`,
         error
       );
       erro++;
@@ -429,11 +521,11 @@ async function registrarSincronizacao(
     // TODO: Implementar log na tabela sincronizacao_log quando a estrutura estiver corrigida
     // Por enquanto, apenas logamos no console
     console.log(
-      `[${new Date().toLocaleString("pt-BR")}] 📝 Resultado da sincronização registrado (console only)`
+      `[${obterTimestamp()}] 📝 Resultado da sincronização registrado (console only)`
     );
   } catch (error) {
     console.error(
-      `[${new Date().toLocaleString("pt-BR")}] ⚠️ Erro ao registrar sincronização:`,
+      `[${obterTimestamp()}] ⚠️ Erro ao registrar sincronização:`,
       error
     );
   }
@@ -447,14 +539,14 @@ export async function executarSincronizacaoBling(): Promise<void> {
 
   if (!supabaseUrl) {
     console.error(
-      `[${new Date().toLocaleString("pt-BR")}] ❌ ERRO: Variável SUPABASE_URL não definida!`
+      `[${obterTimestamp()}] ❌ ERRO: Variável SUPABASE_URL não definida!`
     );
     return;
   }
 
   if (!supabaseAnonKey) {
     console.error(
-      `[${new Date().toLocaleString("pt-BR")}] ❌ ERRO: Variável SUPABASE_ANON_KEY não definida!`
+      `[${obterTimestamp()}] ❌ ERRO: Variável SUPABASE_ANON_KEY não definida!`
     );
     return;
   }
@@ -464,7 +556,7 @@ export async function executarSincronizacaoBling(): Promise<void> {
   // Validar credenciais Bling
   if (!BLING_ACCESS_TOKEN) {
     console.error(
-      `[${new Date().toLocaleString("pt-BR")}] ❌ ERRO: BLING_ACCESS_TOKEN não definido!`
+      `[${obterTimestamp()}] ❌ ERRO: BLING_ACCESS_TOKEN não definido!`
     );
     console.error(`   Configure em: Railway → Variables ou .env`);
     return;
@@ -473,7 +565,7 @@ export async function executarSincronizacaoBling(): Promise<void> {
   const inicioSincronizacao = Date.now();
 
   console.log(
-    `\n[${new Date().toLocaleString("pt-BR")}] 🔷 Iniciando sincronização de ESTOQUE BLING...`
+    `\n[${obterTimestamp()}] 🔷 Iniciando sincronização de ESTOQUE BLING...`
   );
 
   try {
@@ -485,24 +577,24 @@ export async function executarSincronizacaoBling(): Promise<void> {
 
     if (estoquesBling.size === 0) {
       console.log(
-        `[${new Date().toLocaleString("pt-BR")}] ⚠️ Nenhum produto encontrado na Bling`
+        `[${obterTimestamp()}] ⚠️ Nenhum produto encontrado na Bling`
       );
       return;
     }
 
     console.log(
-      `[${new Date().toLocaleString("pt-BR")}] 📊 Buscando estoque atual do Supabase...`
+      `[${obterTimestamp()}] 📊 Buscando estoque atual do Supabase...`
     );
 
     // Obter dados atuais de estoque
     const estoqueAtual = await obterDadosEstoqueAtuais();
     console.log(
-      `[${new Date().toLocaleString("pt-BR")}] ✅ Carregados ${estoqueAtual.size} SKUs atuais`
+      `[${obterTimestamp()}] ✅ Carregados ${estoqueAtual.size} SKUs atuais`
     );
 
     // Sincronizar com Supabase
     console.log(
-      `[${new Date().toLocaleString("pt-BR")}] 🔄 Sincronizando com Bling...`
+      `[${obterTimestamp()}] 🔄 Sincronizando com Bling...`
     );
     const resultado = await sincronizarEstoqueBling(estoquesBling, estoqueAtual);
 
@@ -512,7 +604,7 @@ export async function executarSincronizacaoBling(): Promise<void> {
     const tempoDecorrido = ((Date.now() - inicioSincronizacao) / 1000).toFixed(2);
 
     console.log(
-      `[${new Date().toLocaleString("pt-BR")}] 🔷 Sincronização Bling Concluída`
+      `[${obterTimestamp()}] 🔷 Sincronização Bling Concluída`
     );
     console.log(
       `   ├─ Produtos verificados: ${resultado.verificados}`

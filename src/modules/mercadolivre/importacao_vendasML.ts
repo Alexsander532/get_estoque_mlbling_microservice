@@ -1,5 +1,6 @@
 import axios from "axios";
 import { createClient } from "@supabase/supabase-js";
+import { obterDataBrasileira } from "../../utils/timestamp.js";
 
 interface OrderItem {
   id: string;
@@ -80,7 +81,7 @@ async function fazerRequisicaoComRetry<T>(
       if (ehRateLimiting && tentativa < tentativasMaximas) {
         const tempoEsperaSegundos = Math.ceil(delayAtual / 1000);
         console.log(
-          `[${new Date().toLocaleString("pt-BR")}] ⚠️  Rate limiting detectado em ${nomeRequisicao}. ` +
+          `[${obterDataBrasileira()}] ⚠️  Rate limiting detectado em ${nomeRequisicao}. ` +
           `Tentativa ${tentativa}/${tentativasMaximas}. Aguardando ${tempoEsperaSegundos}s antes de tentar novamente...`
         );
         
@@ -106,10 +107,10 @@ async function obterAccessToken(): Promise<string> {
       refresh_token: ML_REFRESH_TOKEN,
     });
 
-    console.log(`[${new Date().toLocaleString("pt-BR")}] ✅ Access token obtido com sucesso`);
+    console.log(`[${obterDataBrasileira()}] ✅ Access token obtido com sucesso`);
     return response.data.access_token;
   } catch (error) {
-    console.error(`[${new Date().toLocaleString("pt-BR")}] ❌ Erro ao obter access token:`, error);
+    console.error(`[${obterDataBrasileira()}] ❌ Erro ao obter access token:`, error);
     throw error;
   }
 }
@@ -184,10 +185,10 @@ async function obterPedidos(
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
 
-    console.log(`[${new Date().toLocaleString("pt-BR")}] ✅ ${orders.length} pedidos obtidos`);
+    console.log(`[${obterDataBrasileira()}] ✅ ${orders.length} pedidos obtidos`);
     return orders;
   } catch (error) {
-    console.error(`[${new Date().toLocaleString("pt-BR")}] ❌ Erro ao obter pedidos:`, error);
+    console.error(`[${obterDataBrasileira()}] ❌ Erro ao obter pedidos:`, error);
     return [];
   }
 }
@@ -199,7 +200,7 @@ async function obterIdsExistentes(): Promise<Set<string>> {
     if (error) throw error;
     return new Set(data.map((row: { order_id: string }) => row.order_id));
   } catch (error) {
-    console.error(`[${new Date().toLocaleString("pt-BR")}] ❌ Erro ao obter IDs existentes:`, error);
+    console.error(`[${obterDataBrasileira()}] ❌ Erro ao obter IDs existentes:`, error);
     return new Set();
   }
 }

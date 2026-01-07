@@ -1,0 +1,26 @@
+{
+    "results": [
+        {
+            "type": "AVAILABLE",
+            "quantity": 0,
+            "channel": {
+                "id": "9fe0d853-732b-4e4a-a0b0-cff988ed043d"
+            },
+            "created_at": "2022-12-12T23:59:12.947000",
+            "updated_at": "2025-10-11T13:01:25.182000"
+        }
+    ],
+    "meta": {
+        "page": {
+            "limit": 2,
+            "offset": 0,
+            "count": 1,
+            "max_limit": 100
+        },
+        "links": {
+            "previous": "/seller/v1/portfolios/stocks?_limit=2&_offset=0",
+            "next": "/seller/v1/portfolios/stocks?_limit=2&_offset=2",
+            "self": "/seller/v1/portfolios/stocks?_limit=2&_offset=0"
+        }
+    }
+}
