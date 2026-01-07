@@ -230,6 +230,17 @@ async function obterPedidosMagalu(
     let page = 1;
     let totalProcessados = 0;
 
+    // Validar formato das datas
+    console.log(
+      `[${obterDataBrasileira()}] 🔍 Validando datas: de ${dateFrom} até ${dateTo}`
+    );
+    
+    // Verificar se as datas estão no formato correto (YYYY-MM-DD)
+    const regexData = /^\d{4}-\d{2}-\d{2}$/;
+    if (!regexData.test(dateFrom) || !regexData.test(dateTo)) {
+      throw new Error(`Formato de data inválido. Esperado: YYYY-MM-DD. Recebido: ${dateFrom} até ${dateTo}`);
+    }
+
     while (true) {
       console.log(
         `[${obterDataBrasileira()}] 📄 Buscando pedidos Magalu (página ${page}, offset: ${offset}, limit: ${limitePorlPage})...`
@@ -242,8 +253,8 @@ async function obterPedidosMagalu(
             "Content-Type": "application/json",
           },
           params: {
-            purchased_at__gte: `${dateFrom}T00:00:00Z`,
-            purchased_at__lte: `${dateTo}T23:59:59Z`,
+            purchased_at__gte: `${dateFrom}T00:00:00.000Z`,
+            purchased_at__lte: `${dateTo}T23:59:59.999Z`,
             _offset: offset,
             limit: limitePorlPage,
           },
