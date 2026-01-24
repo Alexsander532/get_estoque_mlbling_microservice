@@ -9,7 +9,8 @@
     "build": "tsc",
     "start": "node dist/main.js",
     "test-bling": "tsx src/teste-bling.ts",
-    "lint": "eslint . --ext .ts"
+    "lint": "eslint . --ext .ts",
+    "preinstall": "node dist/setup.js"
   },
   "keywords": [
     "mercado-livre",

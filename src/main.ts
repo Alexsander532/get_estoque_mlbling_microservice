@@ -714,10 +714,18 @@ async function sincronizarMagaluEstoque(): Promise<void> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// 3.6 MAGALU - Sincronizar Vendas
+// 3.6 MAGALU - Sincronizar Vendas COM RETRY AUTOMÁTICO DE AUTENTICAÇÃO
 // ─────────────────────────────────────────────────────────────────────────
 /**
- * Sincroniza dados de VENDAS do Magalu
+ * Sincroniza dados de VENDAS do Magalu com retry automático
+ * 
+ * FLUXO:
+ * 1. Tenta sincronizar vendas
+ * 2. Se falhar com 401 (token inválido):
+ *    ├─ Tenta renovar o token automaticamente
+ *    └─ Se conseguir renovar: tenta novamente
+ * 3. Se falhar com refresh token inválido:
+ *    └─ Apenas loga o erro (não tenta novamente)
  * 
  * Sequência:
  * 1. Busca pedidos do mês atual na API Magalu (com paginação)
@@ -727,15 +735,16 @@ async function sincronizarMagaluEstoque(): Promise<void> {
  * 
  * Tempo estimado: ~5-15 segundos (dependendo da quantidade de vendas)
  */
-async function sincronizarMagaluVendas(): Promise<void> {
+async function sincronizarMagaluVendasComRetry(): Promise<void> {
   console.log(`\n${"─".repeat(80)}`);
-  console.log(`📦 MAGALU - Sincronizando VENDAS`);
+  console.log(`📦 MAGALU - Sincronizando VENDAS COM RETRY AUTOMÁTICO`);
   console.log(`${"─".repeat(80)}`);
 
   const tempoInicioVendas = Date.now();
+  let tentativa = 1;
 
   try {
-    console.log(`   ▶️  Sincronizando VENDAS (período: mês atual)...`);
+    console.log(`   [TENTATIVA ${tentativa}] ▶️  Sincronizando VENDAS (período: mês atual)...`);
     await executarSincronizacaoVendasMagalu();
     const tempoFimVendas = ((Date.now() - tempoInicioVendas) / 1000).toFixed(2);
     console.log(`✅ MAGALU VENDAS: Vendas sincronizadas com sucesso! (${tempoFimVendas}s)\n`);
@@ -751,16 +760,114 @@ async function sincronizarMagaluVendas(): Promise<void> {
     
   } catch (error) {
     const mensagemErro = error instanceof Error ? error.message : String(error);
-    console.error(`\n❌ ERRO em Magalu Vendas:`, mensagemErro);
-    console.error(`⚠️  Continuando...\n`);
-    
-    const { orientacao, erroDetalhado } = obterOrientacaoErro(error, "Magalu");
-    
-    if (resultadosCiclo.magalu.status !== "erro") {
-      resultadosCiclo.magalu.status = "erro";
-      resultadosCiclo.magalu.erro = mensagemErro;
-      resultadosCiclo.magalu.erroDetalhado = erroDetalhado;
-      resultadosCiclo.magalu.orientacao = orientacao;
+    const statusCode = mensagemErro.includes("401") ? 401 : null;
+
+    // ✅ Se é erro 401 (token inválido), tenta renovar e repetir
+    if (statusCode === 401 && tentativa === 1) {
+      console.log(`\n⚠️  [TENTATIVA ${tentativa}] Token inválido (401)`);
+      console.log(`   🔄 Tentando renovar token automaticamente...\n`);
+      
+      try {
+        const tokenRenovado = await obterAccessTokenMagalu();
+        
+        if (tokenRenovado) {
+          console.log(`   ✅ Token renovado com sucesso!`);
+          console.log(`   [TENTATIVA 2] ▶️  Tentando sincronizar VENDAS novamente...\n`);
+          
+          tentativa = 2;
+          
+          // Tenta novamente com novo token
+          const tempoInicioVendasRetry = Date.now();
+          await executarSincronizacaoVendasMagalu();
+          const tempoFimVendasRetry = ((Date.now() - tempoInicioVendasRetry) / 1000).toFixed(2);
+          console.log(`✅ MAGALU VENDAS: Vendas sincronizadas com sucesso NA TENTATIVA 2! (${tempoFimVendasRetry}s)\n`);
+          
+          if (resultadosCiclo.magalu.status !== "erro") {
+            resultadosCiclo.magalu.modulos.push({
+              nome: "Vendas (com retry de autenticação)",
+              status: "sucesso",
+              tempoExecucao: tempoFimVendasRetry,
+              avisos: ["Teve que renovar token automaticamente"],
+            });
+            resultadosCiclo.magalu.status = "sucesso";
+          }
+        } else {
+          // Falha ao renovar: refresh token inválido
+          console.log(`   ❌ Falha ao renovar token (Refresh Token inválido)\n`);
+          console.log(`⚠️  MAGALU VENDAS FALHOU - Refresh Token pode estar expirado\n`);
+          
+          const { orientacao, erroDetalhado } = obterOrientacaoErro(error, "Magalu");
+          
+          if (resultadosCiclo.magalu.status !== "erro") {
+            resultadosCiclo.magalu.status = "erro";
+            resultadosCiclo.magalu.erro = `Token renovação falhou (Refresh Token inválido)`;
+            resultadosCiclo.magalu.erroDetalhado = erroDetalhado;
+            resultadosCiclo.magalu.orientacao = orientacao;
+          }
+          
+          resultadosCiclo.magalu.modulos.push({
+            nome: "Vendas",
+            status: "erro",
+            erros: ["Refresh Token inválido ou expirado"],
+          });
+        }
+      } catch (erroRenovacao) {
+        const msgErroRenovacao = erroRenovacao instanceof Error ? erroRenovacao.message : String(erroRenovacao);
+        console.log(`   ❌ Erro ao renovar token: ${msgErroRenovacao}\n`);
+        
+        const { orientacao, erroDetalhado } = obterOrientacaoErro(erroRenovacao, "Magalu");
+        
+        if (resultadosCiclo.magalu.status !== "erro") {
+          resultadosCiclo.magalu.status = "erro";
+          resultadosCiclo.magalu.erro = `Erro na renovação: ${msgErroRenovacao}`;
+          resultadosCiclo.magalu.erroDetalhado = erroDetalhado;
+          resultadosCiclo.magalu.orientacao = orientacao;
+        }
+        
+        resultadosCiclo.magalu.modulos.push({
+          nome: "Vendas",
+          status: "erro",
+          erros: [msgErroRenovacao],
+        });
+      }
+    } else if (statusCode === 401) {
+      // Já tentou renovar e falhou novamente
+      console.log(`\n❌ [TENTATIVA ${tentativa}] Token ainda inválido mesmo após renovação\n`);
+      console.log(`⚠️  MAGALU VENDAS FALHOU - Verificar configurações\n`);
+      
+      const { orientacao, erroDetalhado } = obterOrientacaoErro(error, "Magalu");
+      
+      if (resultadosCiclo.magalu.status !== "erro") {
+        resultadosCiclo.magalu.status = "erro";
+        resultadosCiclo.magalu.erro = mensagemErro;
+        resultadosCiclo.magalu.erroDetalhado = erroDetalhado;
+        resultadosCiclo.magalu.orientacao = orientacao;
+      }
+      
+      resultadosCiclo.magalu.modulos.push({
+        nome: "Vendas",
+        status: "erro",
+        erros: [mensagemErro],
+      });
+    } else {
+      // Outro tipo de erro (não 401)
+      console.error(`\n❌ ERRO em Magalu Vendas:`, mensagemErro);
+      console.error(`⚠️  Continuando...\n`);
+      
+      const { orientacao, erroDetalhado } = obterOrientacaoErro(error, "Magalu");
+      
+      if (resultadosCiclo.magalu.status !== "erro") {
+        resultadosCiclo.magalu.status = "erro";
+        resultadosCiclo.magalu.erro = mensagemErro;
+        resultadosCiclo.magalu.erroDetalhado = erroDetalhado;
+        resultadosCiclo.magalu.orientacao = orientacao;
+      }
+      
+      resultadosCiclo.magalu.modulos.push({
+        nome: "Vendas",
+        status: "erro",
+        erros: [mensagemErro],
+      });
     }
   }
 }
@@ -890,9 +997,9 @@ async function executarCicloCompleto(): Promise<void> {
       await aguardar(2000);
 
       // ────────────────────────────────────────────────────────────────────
-      // [4] SINCRONIZAR MAGALU - VENDAS
+      // [4] SINCRONIZAR MAGALU - VENDAS COM RETRY AUTOMÁTICO
       // ────────────────────────────────────────────────────────────────────
-      await sincronizarMagaluVendas();
+      await sincronizarMagaluVendasComRetry();
       
       // Calcular tempo total Magalu
       if (resultadosCiclo.magalu.tempoInicio) {
